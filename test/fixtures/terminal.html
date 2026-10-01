@@ -18,5 +18,15 @@ terminal.onData(async data => {
   }
 });
 terminal.write('$ ');
-window.fixture = { ready: true, setA11y: value => { terminal.options.screenReaderMode = value; }, write: value => terminal.write(value) };
+window.fixture = {
+  ready: true,
+  setA11y: value => { terminal.options.screenReaderMode = value; },
+  removeReadableOutput: () => {
+    terminal.options.screenReaderMode = false;
+    // xterm 6 uses a DOM renderer by default. Detach those rows explicitly to
+    // emulate a canvas-only UI with no readable DOM or accessibility fallback.
+    document.querySelector('.xterm-rows')?.remove();
+  },
+  write: value => terminal.write(value),
+};
 </script></body></html>

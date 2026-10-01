@@ -9,8 +9,13 @@ function fixture({ output = '$ ', capture = 'xterm-accessibility', headings = ['
   let text = output, inserts = 0, enters = 0, sameInput = true, focused = true, visible = true;
   const input = {
     focus: async () => { focused = true; },
-    evaluate: async fn => {
+    evaluate: async (fn, value) => {
       const source = fn.toString();
+      if (source.includes('new ClipboardEvent')) {
+        if (!sameInput || !visible || !focused) return false;
+        await insertText(value);
+        return true;
+      }
       if (source.includes('isConnected')) return sameInput && visible && (!source.includes('activeElement') || focused);
       return focused;
     },
@@ -26,7 +31,8 @@ function fixture({ output = '$ ', capture = 'xterm-accessibility', headings = ['
     locator: selector => selector === '.xterm textarea.xterm-helper-textarea'
       ? { elementHandle: async () => input }
       : { evaluateAll: async () => headings },
-    keyboard: { insertText: async line => {
+  };
+  const insertText = async line => {
       inserts++;
       if (behavior === 'complete') {
         const match = line.match(/CRC_([a-f0-9]{12}).*?([a-f0-9]{12})/);
@@ -36,7 +42,6 @@ function fixture({ output = '$ ', capture = 'xterm-accessibility', headings = ['
       }
       if (behavior === 'lostFocus') focused = false;
       if (behavior === 'replaceAfterInsert') sameInput = false;
-    } },
   };
   const bridge = new ConnectBridge({ waitMs: 15, pollMs: 1 });
   bridge.browser = { isConnected: () => true };

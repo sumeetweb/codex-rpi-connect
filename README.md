@@ -1,10 +1,10 @@
 # Codex ↔ Raspberry Pi Connect
 
-**v0.2.0 · Private pre-release · Terminal and project-file implementation**
+**v0.2.1 · Pre-release · Terminal and project-file implementation**
 
 A local Codex/MCP plugin that uses Raspberry Pi Connect's ordinary browser Remote shell. It implements approved shell execution, separate stdout/stderr and exit status, asynchronous jobs, cancellation, file listing/stat/read/diff/atomic writes, bounded transfers, and explicit reconnection.
 
-**The code and local worker tests are implemented. Real Raspberry Pi Connect compatibility is not yet established.** The authenticated terminal DOM has not been observed, and this development environment blocks real Chromium execution. This is a release gate, not a claimed working deployment. If Connect exposes only canvas output, startup refuses to proceed; no private API or alternate transport is used.
+**The code and local worker tests are implemented. Real Raspberry Pi Connect compatibility is not yet established.** The authenticated terminal DOM has not been observed. The Chromium/xterm fixture suite is now running in GitHub Actions; it does not use the live Connect service. This is a release gate, not a claimed working deployment. If Connect exposes only canvas output, startup refuses to proceed; no private API or alternate transport is used.
 
 ## Architecture
 
@@ -136,9 +136,9 @@ npm run package:source
 
 Node integration tests execute the **actual worker through the actual source-verified POSIX bootstrap**, using local pipes in a temporary directory. Python tests exercise actual subprocesses, files and PTYs. These are meaningful backend/protocol tests, but they do not establish Connect or browser compatibility.
 
-The real-browser suite is implemented using actual xterm.js and synthetic fixture responses. It is blocked in this development container: Chromium cannot create a required socket, the official browser download returned an invalid archive, and the supported cloud browser rejects the localhost fixture with `ERR_BLOCKED_BY_CLIENT`. No bypass was attempted. See the precise [verification record](docs/verification.md).
+The real-browser suite uses actual xterm.js and synthetic fixture responses. GitHub Actions runs it with Chromium because this development container cannot launch Chromium. The first CI run exposed an accessibility-mode input incompatibility; v0.2.1 uses a standard DOM paste event on the verified terminal, without touching the OS clipboard or private xterm objects. See the precise [verification record](docs/verification.md).
 
-Before release: run the real browser suite, inspect authenticated Connect DOM on an explicitly authorized Pi, pass live exec/file/cancel/reconnect checks, review dependencies/privacy/licensing, and obtain explicit approval to publish. The repository remains private; the package is marked `private: true` and `UNLICENSED`.
+Before release: run the real browser suite, inspect authenticated Connect DOM on an explicitly authorized Pi, pass live exec/file/cancel/reconnect checks, review dependencies/privacy/licensing, and obtain explicit approval to publish. The [source repository](https://github.com/sumeetweb/codex-rpi-connect) is public with the owner's approval. npm/marketplace release is not authorized; the package stays `private: true` and `UNLICENSED`.
 
 ## References
 

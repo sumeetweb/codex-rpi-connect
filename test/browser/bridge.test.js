@@ -21,10 +21,12 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await new Promise(resolve => server?.close(resolve)); });
 
-async function setup(t, { a11y = true, behavior = 'shell', waitMs = 700, workerToken = '0123456789abcdef' } = {}) {
+async function setup(t, { a11y = true, canvasOnly = false, behavior = 'shell', waitMs = 700, workerToken = '0123456789abcdef' } = {}) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   t.after(() => context.close());
   const page = await context.newPage();
+  const pageErrors = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
   let commands = 0;
   await page.exposeFunction('fixtureCommand', async line => {
     commands++;
@@ -32,10 +34,11 @@ async function setup(t, { a11y = true, behavior = 'shell', waitMs = 700, workerT
     if (behavior === 'worker') {
       if (line.startsWith(' python3 ')) return encodeFrame(workerToken, '0000000000000000', { status: 'ready', protocol: 1, root: '/tmp/test-project', python: '3.11.0' }) + '\n';
       const request = JSON.parse(line);
+      if (request.op === 'fixture_echo') return encodeFrame(workerToken, request.id, { value: request.value }) + '\n';
       return encodeFrame(workerToken, request.id, { status: 'running', jobId: '1111111111111111', note: 'wrapped response '.repeat(30) }) + '\n';
     }
     if (behavior === 'disconnect') { setTimeout(() => page.close(), 30); return ''; }
-    if (behavior === 'removeCapture') { setTimeout(() => page.evaluate(() => window.fixture.setA11y(false)), 30); return ''; }
+    if (behavior === 'removeCapture') { setTimeout(() => page.evaluate(() => window.fixture.removeReadableOutput()), 30); return ''; }
     // Synthetic output, deliberately no local/remote shell endpoint. Actual POSIX
     // wrapper execution is tested separately on Linux in protocol.test.js.
     assert.match(line, /^ \/bin\/sh -c '/);
@@ -48,9 +51,10 @@ async function setup(t, { a11y = true, behavior = 'shell', waitMs = 700, workerT
   await page.goto(`${origin}/devices/test-pi/shell`);
   await page.waitForFunction(() => window.fixture?.ready && document.querySelector('.xterm-accessibility-tree')?.textContent?.includes('$'));
   await page.evaluate(a11y => window.fixture.setA11y(a11y), a11y);
+  if (canvasOnly) await page.evaluate(() => window.fixture.removeReadableOutput());
   const bridge = new ConnectBridge({ origin, waitMs, pollMs: 20 });
   bridge.browser = browser; bridge.context = context;
-  return { bridge, page, commands: () => commands, attach: () => bridge.attach({ deviceName: 'test-pi', terminalUrl: page.url() }) };
+  return { bridge, page, pageErrors, commands: () => commands, attach: () => bridge.attach({ deviceName: 'test-pi', terminalUrl: page.url() }) };
 }
 
 test('safe URL prevents off-origin, deceptive origins and credential query disclosure', () => {
@@ -63,15 +67,26 @@ test('real xterm input and rendered a11y output work end-to-end with synthetic c
   const session = await f.attach();
   assert.equal(session.textCapture, 'xterm-accessibility');
   const result = await f.bridge.diagnostic({ sessionId: session.sessionId, probe: 'smoke' });
-  assert.equal(result.status, 'completed');
+  assert.equal(result.status, 'completed', JSON.stringify({ result, pageErrors: f.pageErrors, terminal: await inspectTerminal(f.page) }));
   assert.equal(result.exitCode, 0);
   assert.equal(result.output, 'codex-rpi-connect OK');
   assert.equal(f.commands(), 1);
 });
-test('canvas-only xterm fails closed without sending input', async t => {
-  const f = await setup(t, { a11y: false });
+test('terminal with no readable output fails closed without sending input', async t => {
+  const f = await setup(t, { a11y: false, canvasOnly: true });
+  assert.equal((await inspectTerminal(f.page)).capture, null);
   await assert.rejects(f.attach(), { code: 'OUTPUT_UNAVAILABLE' });
   assert.equal(f.commands(), 0);
+});
+test('ordinary DOM renderer supports input and output when accessibility is disabled', async t => {
+  const f = await setup(t, { a11y: false, waitMs: 2000 });
+  const session = await f.attach();
+  assert.equal(session.textCapture, 'xterm-rendered-dom');
+  const result = await f.bridge.diagnostic({ sessionId: session.sessionId, probe: 'smoke' });
+  assert.equal(result.status, 'completed', JSON.stringify({ result, pageErrors: f.pageErrors, terminal: await inspectTerminal(f.page) }));
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.output, 'codex-rpi-connect OK');
+  assert.equal(f.commands(), 1);
 });
 test('wrong exact device identity and off-origin URL cannot attach', async t => {
   const f = await setup(t);
@@ -155,6 +170,9 @@ test('worker bootstrap and wrapped CRC RPC response through real xterm fixture',
   const result = await f.bridge.workerRpc({ sessionId: binding.sessionId, op: 'job_status', fields: { jobId: '1111111111111111' } });
   assert.equal(result.status, 'running');
   assert.equal(result.note, 'wrapped response '.repeat(30));
+  const unicode = await f.bridge.workerRpc({ sessionId: binding.sessionId, op: 'fixture_echo', fields: { value: 'π / 工作 / café' } });
+  assert.equal(unicode.value, 'π / 工作 / café');
+  assert.deepEqual(f.pageErrors, []);
   await assert.rejects(f.bridge.diagnostic({ sessionId: binding.sessionId, probe: 'smoke' }), { code: 'WORKER_ACTIVE' });
 });
 

@@ -33,7 +33,11 @@ export async function inspectTerminal(page, includeText = true) {
       inputCount: 1,
       capture: a11y ? 'xterm-accessibility' : 'xterm-rendered-dom',
       rowCount: rows.length,
-      text: includeText ? rows.map(row => row.textContent || '').join('\n').slice(-32768) : '',
+      text: includeText ? rows.map(row => {
+        const text = row.textContent || '';
+        // xterm's accessibility renderer uses NBSP as its empty-row placeholder.
+        return a11y && text === '\u00a0' ? '' : text;
+      }).join('\n').slice(-32768) : '',
     };
   }, includeText);
 }
@@ -174,6 +178,22 @@ export class ConnectBridge {
 
   async diagnostic(args) { return this.exclusive(() => this.diagnosticUnlocked(args)); }
 
+  async pasteTerminal(b, text) {
+    // xterm intentionally ignores insertText InputEvents in screen-reader mode.
+    // Use its ordinary DOM paste listener, with an in-memory event payload. This
+    // neither reads/writes the OS clipboard nor touches any private xterm object.
+    const sent = await this.bounded(b.page, b.input.evaluate((input, value) => {
+      if (!input.isConnected || document.activeElement !== input ||
+          input !== document.querySelector('.xterm textarea.xterm-helper-textarea') ||
+          !input.closest('.xterm').checkVisibility({ checkVisibilityCSS: true })) return false;
+      const clipboardData = new DataTransfer();
+      clipboardData.setData('text/plain', value);
+      input.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData }));
+      return true;
+    }, text), 8000);
+    if (!sent) throw new BridgeError('FOCUS_CHANGED', 'The verified terminal was replaced or lost focus before paste.');
+  }
+
   async diagnosticUnlocked({ sessionId, probe }) {
     // Reject unsupported commands before any browser interaction.
     const command = buildDiagnostic(probe);
@@ -189,7 +209,7 @@ export class ConnectBridge {
       b.needsReattach = true;
       this.quarantined.add(b.page);
       sent = true;
-      await this.bounded(b.page, b.page.keyboard.insertText(command.line));
+      await this.pasteTerminal(b, command.line);
       const focused = await this.bounded(b.page, b.input.evaluate(input => input.isConnected && document.activeElement === input && input === document.querySelector('.xterm textarea.xterm-helper-textarea')));
       if (!focused || b.page.url() !== b.terminalUrl || !(await this.bounded(b.page, deviceHeadings(b.page))).includes(b.deviceName)) return { status: 'unknown', reason: 'target_changed_during_input', probe, retrySafe: false };
       await this.bounded(b.page, b.input.press('Enter', { timeout: 1500 }));
@@ -229,7 +249,7 @@ export class ConnectBridge {
     b.needsReattach = true;
     this.quarantined.add(b.page);
     try {
-      await this.bounded(b.page, b.page.keyboard.insertText(line), 8000);
+      await this.pasteTerminal(b, line);
       await this.assertWorkerTarget(b);
       if (!(await this.bounded(b.page, b.input.evaluate(input => document.activeElement === input)))) throw new BridgeError('FOCUS_CHANGED', 'Terminal focus changed during input.');
       await this.bounded(b.page, b.input.press('Enter', { timeout: 1500 }));

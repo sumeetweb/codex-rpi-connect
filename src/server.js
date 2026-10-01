@@ -8,7 +8,7 @@ import { ApprovalError, OperationApprovals } from './approval.js';
 import { ConnectRuntime } from './runtime.js';
 
 export function createConnectServer({ bridge = new ConnectBridge(), approvals } = {}) {
-  const server = new McpServer({ name: 'codex-rpi-connect', version: '0.2.0' });
+  const server = new McpServer({ name: 'codex-rpi-connect', version: '0.2.1' });
   const runtime = new ConnectRuntime(bridge, approvals || new OperationApprovals(server.server));
   const output = value => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] });
   const wrap = handler => async (args, extra) => {

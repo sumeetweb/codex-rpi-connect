@@ -1,4 +1,4 @@
-# Verification record — v0.2.0, 2026-10-01
+# Verification record — v0.2.1, 2026-10-01
 
 ## Passed
 
@@ -17,7 +17,7 @@
   - Atomic/no-clobber writes, hash conflicts/races, new-file modes and existing-mode preservation, durability uncertainty handling
   - Listing/read/stat/diff, upload abort/expiry/limits and bounded job retention
 - Native installation in isolated temporary HOME/CODEX_HOME with **Codex CLI 0.159.0-alpha.7** on Linux
-  - Materialized v0.2.0 personal plugin cache
+  - Materialized v0.2.1 personal plugin cache; all 97 Node tests passed again after the browser-input patch
   - Cached-copy MCP handshake and connect_status
   - Real Codex app-server loaded the plugin from an unrelated cwd and discovered **all 17 tools**, with no tools error
   - A test-only hook in an isolated cached copy observed actual host elicitation capability `{"form":{},"url":{}}`; repository source and actual user profile were untouched
@@ -25,14 +25,20 @@
 
 The 15 installer tests and 42 approval tests are included in the 97 Node total, not additional tests. The Python suite is separate.
 
+## GitHub browser verification
+
+- The owner approved public source upload to [sumeetweb/codex-rpi-connect](https://github.com/sumeetweb/codex-rpi-connect)
+- [Initial CI run](https://github.com/sumeetweb/codex-rpi-connect/actions/runs/36919171758) checked exact commit `b024eff0271e49227a17fe2e22d98880352bc37d`: syntax, Node and Python checks passed; Chromium installed and 12 of 16 browser cases passed
+- That run found that xterm screen-reader mode intentionally ignores plain `insertText` events, and disabling accessibility alone still leaves xterm's readable default DOM renderer
+- v0.2.1 uses a pinned-input standard DOM paste event, normalizes the accessibility empty-row placeholder, corrects the no-readable-output fixture, and adds a positive DOM-renderer case. The resulting 17-case browser suite is awaiting its corrective CI run
+
 ## Blocked / not established
 
-- **Real-browser fixture suite (16 cases): not executed successfully.** Chromium failed during launch because the container denied a required local socket, including an approved environment retry. The official headless-shell download was invalid/truncated. The supported cloud browser refused the localhost fixture with `ERR_BLOCKED_BY_CLIENT`. No restriction bypass was attempted
+- Local Chromium remains unavailable: the container denied a required socket, an official headless-shell download was invalid/truncated, and the supported cloud browser refused the localhost fixture. CI provides the separate supported browser execution environment; no restriction bypass was attempted
 - Authenticated Raspberry Pi Connect DOM/device/terminal selectors: not observed
 - Real Pi command execution, file operations, transfer, approval UI, timeout/cancel and reconnection: not tested
 - GUI/native plugin behavior on macOS or Windows: not tested
 - A Codex model-thread creation attempt was blocked by the container's socket-directory setup; native plugin/MCP loading succeeded independently
-- GitHub private repository creation/push and remote CI: still require the user's GitHub connection
 
 ## What local tests mean
 
