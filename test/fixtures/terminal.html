@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Connect-like xterm fixture (not the real service)</title>
+<link rel="stylesheet" href="/xterm.css"><script src="/xterm.js"></script></head>
+<body><h1>test-pi</h1><p>Test fixture. This is not Raspberry Pi Connect.</p><div id="terminal"></div>
+<script>
+const terminal = new Terminal({ cols: 120, rows: 35, screenReaderMode: true, convertEol: true });
+terminal.open(document.getElementById('terminal'));
+let input = '';
+terminal.onData(async data => {
+  if (data === '\r') {
+    terminal.write('\r\n');
+    const line = input; input = '';
+    const result = await window.fixtureCommand(line);
+    if (result) terminal.write(result.replaceAll('\n', '\r\n') + '$ ');
+  } else {
+    input += data;
+    terminal.write(data);
+  }
+});
+terminal.write('$ ');
+window.fixture = { ready: true, setA11y: value => { terminal.options.screenReaderMode = value; }, write: value => terminal.write(value) };
+</script></body></html>

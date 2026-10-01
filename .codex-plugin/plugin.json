@@ -1,0 +1,25 @@
+{
+  "name": "codex-rpi-connect",
+  "version": "0.2.0",
+  "description": "Local command and file MCP bridge through the Raspberry Pi Connect browser terminal. Live-device acceptance required.",
+  "author": {
+    "name": "Sumeet"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Raspberry Pi Connect",
+    "shortDescription": "Run approved commands and manage project files through Connect.",
+    "longDescription": "Manually authenticated browser sessions, explicit per-operation approvals, bounded foreground command jobs, stdout/stderr capture, cancellation, root-restricted file tools and checksummed terminal transfers. Real Connect compatibility must be validated on an authorized Pi.",
+    "developerName": "Sumeet",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Help me test my Raspberry Pi Connect device."
+    ]
+  }
+}

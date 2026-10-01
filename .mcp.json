@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "rpi_connect": {
+      "command": "node",
+      "args": [
+        "src/server.js"
+      ],
+      "cwd": ".",
+      "tool_timeout_sec": 180
+    }
+  }
+}

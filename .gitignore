@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+*.zip
+*.tgz
+.DS_Store
+playwright-report/
+test-results/
+.auth/
+storage-state*.json
+browser-profile/
+profiles/
+__pycache__/
+*.py[cod]
+dist/

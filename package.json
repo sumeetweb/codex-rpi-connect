@@ -1,0 +1,30 @@
+{
+  "name": "codex-rpi-connect",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser-terminal command and file MCP bridge for Raspberry Pi Connect",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js",
+    "test:browser": "node --test test/browser/*.test.js",
+    "check": "node scripts/check.js",
+    "verify": "npm run check && npm test && npm run test:remote && npm run test:browser",
+    "doctor": "node scripts/doctor.js",
+    "test:remote": "node scripts/test-remote.js",
+    "install:plugin": "node scripts/install-plugin.js",
+    "package:source": "node scripts/package-source.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "playwright": "1.63.0",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@xterm/xterm": "6.0.0"
+  },
+  "license": "UNLICENSED"
+}
