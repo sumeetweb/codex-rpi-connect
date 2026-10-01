@@ -37,4 +37,6 @@ This plugin implements commands and files, but real Connect compatibility must b
 - `connect_stop` requests cleanup/restores echo but keeps the old tab quarantined. `connect_reconnect` binds a newly selected exact tab, obtains fresh startup approval and never replays previous work.
 - Stop/cancel reachable jobs before `connect_close`. Browser/worker close acknowledgement does not prove all remote effects stopped, especially after network loss or blocked kernel/filesystem operations.
 
-See README.md, docs/native-install.md, docs/morning-test.md and SECURITY.md. Keep the repository private until the owner explicitly approves publication.
+See README.md, docs/native-install.md, docs/live-device-validation.md and SECURITY.md. Source is publicly available; package or marketplace release requires owner approval after live validation.
+
+For a large result, `result_available` is resumable progress, not permission to replay. Repeat `connect_job` with the same job ID until its complete checksum is verified. Keep collection active: results expire after 5 idle minutes or 1 hour after completion.

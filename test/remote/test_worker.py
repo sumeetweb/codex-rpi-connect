@@ -320,9 +320,92 @@ class WorkerCase(unittest.TestCase):
         self.assertEqual(len(self.worker.jobs), w.MAX_JOBS)
         self.assertError(self.request("job_status", jobId=first), "NOT_FOUND")
         for job in self.worker.jobs.values():
-            job.finished -= w.RETENTION_SECONDS + 1
+            job.last_access -= w.RETENTION_SECONDS + 1
         self.worker.cleanup_expired()
         self.assertEqual(self.worker.jobs, {})
+
+    def completed_job_at(self, timestamp, job_id="abcdefabcdefabcd"):
+        job = w.Job(self.payload())
+        job.result = w.compact({"content": "x" * 1024})
+        job.finished = timestamp
+        job.last_access = timestamp
+        self.worker.jobs[job_id] = job
+        return job_id, job
+
+    def test_active_result_reads_outlive_completion_then_expire_after_idle(self):
+        job_id, job = self.completed_job_at(1000)
+        with mock.patch.object(w.time, "monotonic", return_value=1299) as monotonic:
+            self.assertEqual(self.request("job_status", jobId=job_id)["status"], "done")
+            self.assertEqual(job.last_access, 1299)
+            # A slow transfer can outlive the original completion-based deadline.
+            monotonic.return_value = 1598
+            first = self.request("result_read", jobId=job_id, offset=0, length=512)
+            self.assertEqual(len(base64.b64decode(first["data"])), 512)
+            monotonic.return_value = 1897
+            second = self.request("result_read", jobId=job_id, offset=512, length=512)
+            self.assertEqual(len(base64.b64decode(second["data"])), 512)
+            self.assertEqual(job.finished, 1000)
+            self.assertEqual(job.last_access, 1897)
+            monotonic.return_value = 2196
+            self.worker.cleanup_expired()
+            self.assertIn(job_id, self.worker.jobs)
+            monotonic.return_value = 2197
+            self.assertError(self.request("job_status", jobId=job_id), "NOT_FOUND")
+            self.assertEqual(self.worker.jobs, {})
+
+    def test_absolute_result_lifetime_expires_despite_frequent_access(self):
+        finished = 1000
+        job_id, job = self.completed_job_at(finished)
+        hard_deadline = finished + w.MAX_RESULT_LIFETIME_SECONDS
+        with mock.patch.object(w.time, "monotonic", return_value=finished) as monotonic:
+            for timestamp in range(finished + w.RETENTION_SECONDS - 1, hard_deadline,
+                                   w.RETENTION_SECONDS - 1):
+                monotonic.return_value = timestamp
+                self.assertEqual(self.request("job_status", jobId=job_id)["status"], "done")
+                self.assertEqual(job.last_access, timestamp)
+            self.assertEqual(job.finished, finished)
+            self.assertLess(hard_deadline - job.last_access, w.RETENTION_SECONDS)
+            monotonic.return_value = hard_deadline
+            self.assertError(self.request("result_read", jobId=job_id, offset=0, length=512), "NOT_FOUND")
+            self.assertEqual(self.worker.jobs, {})
+
+    def test_invalid_result_read_does_not_extend_idle_retention(self):
+        job_id, job = self.completed_job_at(1000)
+        with mock.patch.object(w.time, "monotonic", return_value=1299) as monotonic:
+            self.assertError(self.request("result_read", jobId=job_id,
+                                          offset=len(job.result) + 1, length=1), "INVALID_ARGUMENT")
+            self.assertEqual(job.last_access, 1000)
+            monotonic.return_value = 1300
+            self.assertError(self.request("job_status", jobId=job_id), "NOT_FOUND")
+
+    def test_cached_read_refreshes_only_an_unexpired_result(self):
+        job_id, job = self.completed_job_at(1000)
+        request = dict(id="feedfacefeedface", op="result_read", jobId=job_id, offset=0, length=512)
+        with mock.patch.object(w.time, "monotonic", return_value=1299) as monotonic:
+            first = self.worker.handle(request)
+            monotonic.return_value = 1598
+            self.assertEqual(self.worker.handle(request), first)
+            self.assertEqual(job.last_access, 1598)
+            self.assertEqual(job.finished, 1000)
+            monotonic.return_value = 1898
+            # Cached read IDs cannot retrieve old fragments after job expiry.
+            self.assertError(self.worker.handle(request), "NOT_FOUND")
+            self.assertNotIn(job_id, self.worker.jobs)
+
+    def test_recent_access_does_not_change_oldest_completion_eviction(self):
+        for index in range(w.MAX_JOBS):
+            self.completed_job_at(1000 + index, "%016x" % (100 + index))
+        first = "%016x" % 100
+        with mock.patch.object(w.time, "monotonic", return_value=1100):
+            self.request("job_status", jobId=first)
+            self.assertEqual(self.worker.jobs[first].last_access, 1100)
+            # Supply an already completed test job directly to exercise eviction
+            # deterministically without running a thread under the fake clock.
+            with mock.patch.object(w.threading.Thread, "start"):
+                started = self.worker.start_job(self.payload())
+            self.assertEqual(len(self.worker.jobs), w.MAX_JOBS)
+            self.assertNotIn(first, self.worker.jobs)
+            self.worker.jobs[started["jobId"]].thread = None
 
     def test_result_read_bounds(self):
         started = self.upload(self.payload())

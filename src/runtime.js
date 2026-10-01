@@ -7,8 +7,9 @@ const MAX_PAYLOAD = 262144;
 const MAX_RESULT = 524288;
 
 export class ConnectRuntime {
-  constructor(bridge, approvals, { sourceLoader = () => readFile(new URL('../remote/worker.py', import.meta.url), 'utf8') } = {}) {
+  constructor(bridge, approvals, { sourceLoader = () => readFile(new URL('../remote/worker.py', import.meta.url), 'utf8'), now = Date.now } = {}) {
     this.bridge = bridge; this.approvals = approvals; this.sourceLoader = sourceLoader;
+    this.now = now;
     this.session = null; this.jobs = new Map(); this.submitting = false;
   }
   requireSession(sessionId) {
@@ -95,25 +96,42 @@ export class ConnectRuntime {
     const record = this.jobs.get(jobId);
     if (!record || record.sessionId !== sessionId) throw new BridgeError('UNKNOWN_JOB', 'This client did not start that job in this session.');
     if (record.result) return { jobId, status: 'done', result: record.result };
+    if (record.collecting) throw new BridgeError('BUSY', 'This job result is already being collected.');
+    record.collecting = true;
+    try { return await this.collectJob({ sessionId, jobId, waitMs }, record, signal); }
+    finally { record.collecting = false; }
+  }
+  async collectJob({ sessionId, jobId, waitMs }, record, signal) {
     const deadline = Date.now() + Math.min(waitMs, 10000);
     let state;
     do {
-      if (signal?.aborted) return { jobId, status: 'running', instruction: 'Waiting was cancelled. The command may still be running; use connect_cancel to stop this job.' };
+      if (signal?.aborted) return record.download
+        ? { jobId, status: 'result_available', receivedBytes: record.download.offset, totalBytes: record.download.byteLength, instruction: 'Result collection was cancelled. Call connect_job with the same jobId to resume; do not execute the operation again.' }
+        : { jobId, status: 'running', instruction: 'Waiting was cancelled. The command may still be running; use connect_cancel to stop this job.' };
       state = await this.rpc(sessionId, 'job_status', { jobId });
       if (state.status === 'done') break;
       if (Date.now() >= deadline) return { jobId, status: 'running', kind: record.kind };
       await sleep(100);
     } while (true);
     if (!Number.isSafeInteger(state.byteLength) || state.byteLength < 0 || state.byteLength > MAX_RESULT || !/^[a-f0-9]{64}$/.test(state.sha256)) throw new BridgeError('WORKER_PROTOCOL', 'Invalid result metadata. Outcome is uncertain; do not replay.');
-    const chunks = [];
-    for (let offset = 0; offset < state.byteLength;) {
-      if (signal?.aborted) return { jobId, status: 'result_available', instruction: 'Result download was cancelled. The operation has finished; call connect_job again to retrieve its retained result. Do not execute it again.' };
-      const chunk = await this.rpc(sessionId, 'result_read', { jobId, offset, length: RESULT_CHUNK_BYTES });
+    if (record.download && (record.download.byteLength !== state.byteLength || record.download.sha256 !== state.sha256)) throw new BridgeError('RESULT_INTEGRITY', 'Retained result identity changed. Do not execute the operation again.');
+    const download = record.download ||= { byteLength: state.byteLength, sha256: state.sha256, chunks: [], offset: 0 };
+    record.state = 'result_available';
+    // Accessibility rows can refresh only about once a second. Bound each tool
+    // call and retain validated chunks, rather than restarting large downloads.
+    const transferDeadline = this.now() + 20000;
+    let chunksThisCall = 0;
+    for (; download.offset < state.byteLength;) {
+      if (signal?.aborted || chunksThisCall >= 32 || this.now() >= transferDeadline) return {
+        jobId, status: 'result_available', receivedBytes: download.offset, totalBytes: state.byteLength,
+        instruction: 'The operation has finished. Call connect_job with this jobId to resume result collection; do not execute the operation again. Partial bytes are withheld until the complete SHA-256 is verified.',
+      };
+      const chunk = await this.rpc(sessionId, 'result_read', { jobId, offset: download.offset, length: RESULT_CHUNK_BYTES });
       const data = Buffer.from(chunk.data || '', 'base64');
-      if (chunk.offset !== offset || !data.length || data.length > RESULT_CHUNK_BYTES || data.toString('base64') !== chunk.data) throw new BridgeError('WORKER_PROTOCOL', 'Invalid result chunk; do not replay the operation.');
-      chunks.push(data); offset += data.length;
+      if (chunk.offset !== download.offset || !data.length || data.length > RESULT_CHUNK_BYTES || download.offset + data.length > state.byteLength || data.toString('base64') !== chunk.data) throw new BridgeError('WORKER_PROTOCOL', 'Invalid result chunk; do not replay the operation.');
+      download.chunks.push(data); download.offset += data.length; chunksThisCall++;
     }
-    const bytes = Buffer.concat(chunks);
+    const bytes = Buffer.concat(download.chunks);
     if (bytes.length !== state.byteLength || sha256(bytes) !== state.sha256) throw new BridgeError('RESULT_INTEGRITY', 'Result checksum did not match. The operation may have completed; do not replay.');
     let result;
     try { result = JSON.parse(bytes.toString('utf8')); } catch { throw new BridgeError('WORKER_PROTOCOL', 'Result was not valid JSON.'); }
@@ -128,7 +146,7 @@ export class ConnectRuntime {
       if (Buffer.from(text).equals(raw)) result.text = text;
       else result.encoding = 'base64 (binary; UTF-8 text omitted)';
     }
-    record.result = result; record.state = 'done';
+    record.result = result; record.state = 'done'; delete record.download;
     return { jobId, status: 'done', result };
   }
   async cancel({ sessionId, jobId }) {
@@ -138,7 +156,10 @@ export class ConnectRuntime {
     return { jobId, ...result, instruction: 'Use connect_job to verify the terminal result. Cancellation acknowledgement alone is not proof that the process exited.' };
   }
   disconnected() {
-    for (const record of this.jobs.values()) { if (record.state === 'running') record.state = 'unknown'; delete record.result; }
+    for (const record of this.jobs.values()) {
+      if (record.state === 'running' || record.state === 'result_available') record.state = 'unknown';
+      delete record.result; delete record.download;
+    }
     this.session = null;
   }
   summary() { return { worker: this.session ? { sessionId: this.session.id, workspaceRoot: this.session.root, deviceName: this.session.deviceName } : null, jobs: [...this.jobs].map(([jobId, job]) => ({ jobId, kind: job.kind, status: job.state })) }; }

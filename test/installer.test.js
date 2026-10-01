@@ -33,7 +33,7 @@ function fixture(t) {
   write(path.join(source, 'skills/rpi-connect/SKILL.md'), '# Fixture\n');
   write(path.join(source, 'README.md'), '# Fixture setup\n');
   write(path.join(source, 'SECURITY.md'), '# Fixture security\n');
-  write(path.join(source, 'docs/morning-test.md'), '# Fixture acceptance\n');
+  write(path.join(source, 'docs/live-device-validation.md'), '# Fixture acceptance\n');
   return { temporary, source, home };
 }
 

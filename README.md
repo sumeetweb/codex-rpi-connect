@@ -1,6 +1,6 @@
 # Codex ↔ Raspberry Pi Connect
 
-**v0.2.1 · Pre-release · Terminal and project-file implementation**
+**v0.2.2 · Pre-release · Terminal and project-file implementation**
 
 A local Codex/MCP plugin that uses Raspberry Pi Connect's ordinary browser Remote shell. It implements approved shell execution, separate stdout/stderr and exit status, asynchronous jobs, cancellation, file listing/stat/read/diff/atomic writes, bounded transfers, and explicit reconnection.
 
@@ -77,7 +77,7 @@ This records absolute Node/source paths in local Codex configuration. Keep this 
 8. `connect_stop` asks the worker to stop and restore echo. The old tab stays quarantined from plugin input because the acknowledgement can arrive before Python fully exits. For another session, open a **new Remote shell tab**, confirm its exact identity, and use `connect_reconnect`. Previous uncertain operations are never replayed.
 9. `connect_close` closes only the browser owned by the plugin. Reachable jobs should be stopped first. A lost connection does not establish that remote work stopped.
 
-See [morning acceptance](docs/morning-test.md) for the required live checks.
+See [Live Device Validation](docs/live-device-validation.md) for the required live checks.
 
 ## Tool reference
 
@@ -108,7 +108,8 @@ See [morning acceptance](docs/morning-test.md) for the required live checks.
 - File paths cannot be absolute, contain `..`, traverse symlinks or target known credential stores/secret filenames. Existing directories are required; approved shell commands can perform additional project operations
 - File writes use no-follow directory handles, same-directory temp files, fsync and atomic replacement. Create-only is no-clobber. Existing mode is preserved; explicit 0600/0644 mode is accepted only for new files
 - Hash preconditions detect observed changes but are not an OS-level compare-and-swap against unrelated concurrent writers. Coordinate other writers. `COMMIT_UNCERTAIN` means replacement may have happened but durability could not be confirmed; inspect the file before deciding what to do
-- Remote jobs: at most 8 retained, 5-minute retention with oldest-completed eviction; local cached jobs/results are capped at 8. Collect results promptly
+- Remote jobs: at most 8 retained, 5-minute idle expiry and a 1-hour absolute lifetime after completion, with oldest-completed eviction. Successful status/read requests refresh idle time, never the absolute lifetime. Local cached jobs/results are capped at 8
+- Large result collection is resumable: each call reads at most 32 chunks or about 20 seconds of responses, then returns `result_available` with byte progress. Call `connect_job` again with the same ID. Partial content is withheld until the full SHA-256 verifies; cancellation preserves progress. Never rerun the original command/write to retrieve its result
 - Uploads: at most 4, expire after 120 seconds; cancellation before commit aborts the upload when the transport is still usable
 - Requests use bounded physical input lines, acknowledged chunks, per-frame CRC32 and whole-payload/result SHA-256. These detect accidental corruption; they are not authentication of a malicious page or device
 - The terminal is serialized; don't type, resize, navigate or change focus during an operation. Unknown outcomes quarantine it. A user focus race cannot be eliminated completely by browser checks
@@ -134,11 +135,11 @@ npm run verify       # all checks; browser failures are not silently skipped
 npm run package:source
 ```
 
-Node integration tests execute the **actual worker through the actual source-verified POSIX bootstrap**, using local pipes in a temporary directory. Python tests exercise actual subprocesses, files and PTYs. These are meaningful backend/protocol tests, but they do not establish Connect or browser compatibility.
+Node integration tests execute the **actual worker through the actual source-verified POSIX bootstrap**, using local pipes and real interactive shell PTYs in temporary directories. Python tests exercise actual subprocesses, files and PTYs. The PTY regression covers both POSIX sh and bash bracketed paste, full-loader transfer, actual command/results and terminal restoration. These tests do not establish live Connect compatibility.
 
 The real-browser suite uses actual xterm.js and synthetic fixture responses. GitHub Actions runs it with Chromium because this development container cannot launch Chromium. The first CI run exposed an accessibility-mode input incompatibility; v0.2.1 uses a standard DOM paste event on the verified terminal, without touching the OS clipboard or private xterm objects. See the precise [verification record](docs/verification.md).
 
-Before release: run the real browser suite, inspect authenticated Connect DOM on an explicitly authorized Pi, pass live exec/file/cancel/reconnect checks, review dependencies/privacy/licensing, and obtain explicit approval to publish. The [source repository](https://github.com/sumeetweb/codex-rpi-connect) is public with the owner's approval. npm/marketplace release is not authorized; the package stays `private: true` and `UNLICENSED`.
+Before package release: inspect authenticated Connect DOM on an explicitly authorized Pi, pass live exec/file/cancel/reconnect checks, review dependencies/privacy/licensing, and obtain explicit approval to publish. The [source repository](https://github.com/sumeetweb/codex-rpi-connect) is public. npm publishing remains disabled and the license is `UNLICENSED`; no marketplace release has been made.
 
 ## References
 

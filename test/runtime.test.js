@@ -151,14 +151,83 @@ remoteTest('cancellation during result download stops transfer without replaying
   const controller = new AbortController();
   const original = f.bridge.workerRpc.bind(f.bridge);
   let chunks = 0;
+  const offsets = [];
   f.bridge.workerRpc = async args => {
     const result = await original(args);
-    if (args.op === 'result_read' && ++chunks === 1) controller.abort();
+    if (args.op === 'result_read') {
+      offsets.push(args.fields.offset);
+      if (++chunks === 1) controller.abort();
+    }
     return result;
   };
   const partial = await f.runtime.job({ sessionId: f.sessionId, jobId: started.jobId, waitMs: 1000 }, controller.signal);
   assert.equal(partial.status, 'result_available'); assert.equal(chunks, 1);
   const complete = await collect(f, started.jobId);
   assert.equal(complete.exitCode, 0);
+  assert.deepEqual(offsets.slice(0, 2), [0, 512]);
   assert.equal(f.bridge.calls.filter(op => op === 'upload_commit').length, 1);
+});
+
+remoteTest('maximum-size file results resume in bounded chunks without exposing unchecked partial content', async t => {
+  const f = await setup(t);
+  const bytes = Buffer.from(Array.from({ length: 65536 }, (_, index) => index % 256));
+  await writeFile(join(f.root, 'large.bin'), bytes);
+  const partial = await f.runtime.file('file_read', { sessionId: f.sessionId, path: 'large.bin' });
+  assert.equal(partial.status, 'result_available');
+  assert.equal(partial.receivedBytes, 32 * 512);
+  assert.ok(partial.totalBytes > partial.receivedBytes);
+  assert.equal(partial.result, undefined);
+  assert.equal(partial.data, undefined);
+  const result = await collect(f, partial.jobId);
+  assert.deepEqual(Buffer.from(result.data, 'base64'), bytes);
+  assert.equal(f.runtime.jobs.get(partial.jobId).download, undefined);
+  assert.equal(f.bridge.calls.filter(op => op === 'upload_commit').length, 1);
+});
+
+remoteTest('slow rendered-response timing yields resumable progress before the tool-call deadline', async t => {
+  const f = await setup(t);
+  await writeFile(join(f.root, 'slow.txt'), 'x'.repeat(20000));
+  let elapsed = 0;
+  f.runtime.now = () => elapsed;
+  const original = f.bridge.workerRpc.bind(f.bridge);
+  f.bridge.workerRpc = async args => {
+    const value = await original(args);
+    if (args.op === 'result_read') elapsed += 7000;
+    return value;
+  };
+  const partial = await f.runtime.file('file_read', { sessionId: f.sessionId, path: 'slow.txt' });
+  assert.equal(partial.status, 'result_available');
+  assert.equal(partial.receivedBytes, 3 * 512);
+  assert.equal((await collect(f, partial.jobId)).text, 'x'.repeat(20000));
+  assert.equal(f.bridge.calls.filter(op => op === 'upload_commit').length, 1);
+});
+
+remoteTest('a resumed result must keep its original length and SHA-256 identity', async t => {
+  const f = await setup(t);
+  await writeFile(join(f.root, 'identity.txt'), 'x'.repeat(20000));
+  const partial = await f.runtime.file('file_read', { sessionId: f.sessionId, path: 'identity.txt' });
+  assert.equal(partial.status, 'result_available');
+  const original = f.bridge.workerRpc.bind(f.bridge);
+  f.bridge.workerRpc = async args => {
+    const value = await original(args);
+    return args.op === 'job_status' ? { ...value, sha256: '0'.repeat(64) } : value;
+  };
+  await assert.rejects(f.runtime.job({ sessionId: f.sessionId, jobId: partial.jobId }), { code: 'RESULT_INTEGRITY' });
+  assert.equal(f.bridge.calls.filter(op => op === 'upload_commit').length, 1);
+});
+
+remoteTest('simultaneous collection of one result cannot race retained offsets', async t => {
+  const f = await setup(t);
+  const started = await f.runtime.exec({ sessionId: f.sessionId, command: 'printf done', timeoutMs: 1000, maxOutputBytes: 1024 });
+  const original = f.bridge.workerRpc.bind(f.bridge);
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  f.bridge.workerRpc = async args => {
+    if (args.op === 'job_status') await gate;
+    return original(args);
+  };
+  const first = f.runtime.job({ sessionId: f.sessionId, jobId: started.jobId, waitMs: 1000 });
+  await assert.rejects(f.runtime.job({ sessionId: f.sessionId, jobId: started.jobId }), { code: 'BUSY' });
+  release();
+  assert.equal((await first).result.stdoutText, 'done');
 });

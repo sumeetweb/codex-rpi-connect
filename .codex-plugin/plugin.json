@@ -1,6 +1,6 @@
 {
   "name": "codex-rpi-connect",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Local command and file MCP bridge through the Raspberry Pi Connect browser terminal. Live-device acceptance required.",
   "author": {
     "name": "Sumeet"

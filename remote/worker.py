@@ -40,6 +40,7 @@ MAX_RESULT = 524288
 MAX_UPLOADS = 4
 MAX_JOBS = 8
 RETENTION_SECONDS = 300
+MAX_RESULT_LIFETIME_SECONDS = 3600
 UPLOAD_SECONDS = 120
 TERM_GRACE_SECONDS = 0.35
 ID_RE = re.compile(r"^[a-f0-9]{16}$")
@@ -440,6 +441,7 @@ class Job:
         self.thread = None
         self.result = None
         self.finished = None
+        self.last_access = None
         self.process = None
 
 
@@ -558,7 +560,19 @@ class Worker:
             self.uploads = {key: value for key, value in self.uploads.items()
                             if now - value["updated"] < UPLOAD_SECONDS}
             self.jobs = {key: value for key, value in self.jobs.items()
-                         if value.finished is None or now - value.finished < RETENTION_SECONDS}
+                         if value.finished is None or (
+                             now - value.last_access < RETENTION_SECONDS and
+                             now - value.finished < MAX_RESULT_LIFETIME_SECONDS)}
+
+    def refresh_result_access(self, request, response):
+        # Keep a slow, active terminal transfer alive without changing completion
+        # order for bounded-cache eviction. Errors and running polls do not extend it.
+        if ((request["op"] == "job_status" and response.get("status") == "done") or
+                (request["op"] == "result_read" and "data" in response)):
+            with self.lock:
+                job = self.jobs.get(request.get("jobId"))
+                if job is not None and job.result is not None:
+                    job.last_access = time.monotonic()
 
     def handle(self, request):
         fields(request, ("id", "op"), ("byteLength", "sha256", "uploadId", "offset", "data", "jobId", "length"))
@@ -566,18 +580,27 @@ class Worker:
         if request_id == "0000000000000000":
             fail("INVALID_ARGUMENT", "Reserved request identifier")
         signature = hashlib.sha256(compact(request)).digest()
+        self.cleanup_expired()
         if request_id in self.responses:
             old_signature, response = self.responses[request_id]
             if old_signature != signature:
                 fail("REQUEST_ID_CONFLICT", "Request identifier was already used")
+            if (request["op"] in ("job_status", "result_read") and
+                    request.get("jobId") not in self.jobs):
+                # Read-only replay must not expose an expired result fragment.
+                # Keep the signature so reusing this ID for a mutation still fails.
+                response = {"error": {"code": "NOT_FOUND", "message": "Job is missing or expired"}}
+                self.responses[request_id] = (old_signature, response)
+                return response
+            self.refresh_result_access(request, response)
             return response
         try:
-            self.cleanup_expired()
             if self.closed:
                 fail("CLOSED", "Worker is closed")
             response = self.dispatch(request)
         except Exception as exc:
             response = error_result(exc)
+        self.refresh_result_access(request, response)
         self.responses[request_id] = (signature, response)
         while len(self.responses) > 256:
             self.responses.popitem(last=False)
@@ -701,6 +724,7 @@ class Worker:
         with self.lock:
             job.result = encoded
             job.finished = time.monotonic()
+            job.last_access = job.finished
 
     def close(self):
         self.closed = True

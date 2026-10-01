@@ -17,5 +17,5 @@ if (process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND
 }
 console.log('MCP forms: check approvalFormsSupported using connect_status in your actual client. Unsupported forms fail closed.');
 console.log('Pi requirements: Linux/Raspberry Pi OS, Python 3, Connect Remote shell, existing project root. Not checked remotely.');
-console.log('Real browser/Connect session: not checked. Follow docs/morning-test.md.');
+console.log('Real browser/Connect session: not checked. Follow docs/live-device-validation.md.');
 console.log('No credentials, cookies or terminal output were read.');

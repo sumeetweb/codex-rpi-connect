@@ -23,6 +23,8 @@ Terminal messages use request identities, acknowledged bounded chunks, CRC32 fra
 
 Commands have bounded captured streams and process-group timeout/cancellation. Uninterruptible kernel calls, filesystem/Popen stalls and deliberately escaped processes cannot be guaranteed stopped. File jobs have no hard kernel deadline. Cancel/close acknowledgement is not termination proof. Remote retention and local caches are bounded.
 
+Remote job expiry is enforced on the next protocol request: five idle minutes or one hour after completion, whichever comes first. It is an availability bound, not timed memory erasure. Cached read IDs cannot retrieve expired job fragments. The bounded response cache and local collected-result cache can still hold bytes until eviction, disconnection or process exit; no secure-erasure guarantee is made.
+
 Terminal input and device identity are pinned/rechecked; a concurrent user focus/navigation race remains possible. Do not interact with the tab during an operation. After uncertain input or lost capture, inspect the old tab and reconnect in a fresh one. The plugin does not replay.
 
 ## Data handling

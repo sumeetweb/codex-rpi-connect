@@ -1,4 +1,4 @@
-# First real-Pi acceptance checklist
+# Live Device Validation
 
 The terminal/file implementation is present. These checks establish whether the **real Connect UI** works with it; local worker tests cannot establish that.
 
@@ -32,6 +32,7 @@ The terminal/file implementation is present. These checks establish whether the 
 
 - [ ] List/stat the approved directory
 - [ ] Approve create-only write of a harmless UTF-8 test file; read it back and verify exact hash/content
+- [ ] Read a larger disposable file; if `result_available` is returned, repeat `connect_job` with the same job ID and verify progress increases without replaying the file operation
 - [ ] Generate a diff, then approve replacement with the returned current hash
 - [ ] Try a deliberately incorrect expected hash: original file must remain unchanged
 - [ ] Verify absolute paths, `..`, symlinks, known credentials and oversized content are rejected

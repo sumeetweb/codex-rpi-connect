@@ -6,7 +6,7 @@
         "src/server.js"
       ],
       "cwd": ".",
-      "tool_timeout_sec": 180
+      "tool_timeout_sec": 300
     }
   }
 }
